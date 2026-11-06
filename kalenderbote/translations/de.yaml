@@ -1,0 +1,33 @@
+configuration:
+  imap_host:
+    name: IMAP-Server
+    description: Mailserver des Familien-Postfachs, z. B. imap.example.de
+  imap_port:
+    name: IMAP-Port
+    description: Normalerweise 993 (SSL/TLS)
+  imap_user:
+    name: IMAP-Benutzer
+    description: Meist die Mailadresse des Familien-Postfachs
+  imap_password:
+    name: IMAP-Passwort
+  imap_folder:
+    name: Ordner
+    description: Ordner, in dem die Einladungen ankommen
+  processed_folder:
+    name: Ablageordner (optional)
+    description: Verarbeitete Einladungen werden hierhin verschoben. Der Ordner muss existieren.
+  caldav_url:
+    name: CalDAV-Kalender-URL
+    description: z. B. https://cloud.example.de/remote.php/dav/calendars/familie/familie/
+  caldav_user:
+    name: CalDAV-Benutzer
+  caldav_password:
+    name: CalDAV-Passwort
+    description: Am besten ein Nextcloud-App-Passwort
+  allowed_senders:
+    name: Erlaubte Absender
+    description: Nur Einladungen von diesen Adressen werden übernommen (deine und die deiner Frau)
+  poll_interval:
+    name: Abfrageintervall (Sekunden)
+  log_level:
+    name: Log-Level
