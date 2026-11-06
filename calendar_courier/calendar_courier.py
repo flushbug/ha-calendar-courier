@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Kalenderbote – iMIP-Sync für den Familienkalender.
+"""Calendar Courier – iMIP invitations to CalDAV.
 
-Liest Termineinladungen (iMIP, RFC 6047) aus einem IMAP-Postfach und
-spiegelt sie in einen CalDAV-Kalender:
-  REQUEST  -> Termin anlegen bzw. aktualisieren (nur wenn SEQUENCE nicht älter)
-  CANCEL   -> Termin oder einzelnen Serientermin löschen
+Reads meeting invitations (iMIP, RFC 6047) from an IMAP mailbox and
+mirrors them into a CalDAV calendar:
+  REQUEST  -> create or update the event (only if SEQUENCE is not older)
+  CANCEL   -> delete the event or a single occurrence of a series
 """
 
 import email
@@ -25,9 +25,9 @@ from icalendar import Calendar
 
 OPTIONS_FILE = "/data/options.json"
 STATE_FILE = "/data/state.json"
-SEARCH_DAYS = 30          # so weit zurück werden Mails betrachtet
-STATE_KEEP_DAYS = 90      # so lange merken wir uns verarbeitete Mails
-MAX_FAILURES = 3          # danach wird eine kaputte Mail übersprungen
+SEARCH_DAYS = 30          # how far back mails are considered
+STATE_KEEP_DAYS = 90      # how long processed mails are remembered
+MAX_FAILURES = 3          # a broken mail is skipped after this many attempts
 MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun",
           "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 
@@ -35,7 +35,7 @@ log = logging.getLogger("imip")
 
 
 # --------------------------------------------------------------------------
-# Hilfsfunktionen
+# Helpers
 # --------------------------------------------------------------------------
 
 def load_json(path, default):
@@ -68,7 +68,7 @@ def seq(comp):
 
 
 def rid_key(comp):
-    """Vergleichbarer Schlüssel der RECURRENCE-ID (None = Hauptereignis)."""
+    """Comparable key of the RECURRENCE-ID (None = master event)."""
     rid = comp.get("RECURRENCE-ID")
     if rid is None:
         return None
@@ -92,12 +92,12 @@ def series_changed(old, new):
 
 def summary(comp):
     start = comp.get("DTSTART")
-    return "'%s' (%s)" % (comp.get("SUMMARY", "ohne Titel"),
+    return "'%s' (%s)" % (comp.get("SUMMARY", "untitled"),
                           start.dt if start is not None else "?")
 
 
 def mark_accepted(comp, own_addr):
-    """Setzt im gespeicherten Termin die Teilnahme des Familienkalenders auf angenommen."""
+    """Marks the calendar's own attendee entry as accepted."""
     if "@" not in own_addr:
         return
     attendees = comp.get("ATTENDEE")
@@ -113,7 +113,7 @@ def mark_accepted(comp, own_addr):
 
 def new_calendar():
     cal = Calendar()
-    cal.add("prodid", "-//Kalenderbote//DE")
+    cal.add("prodid", "-//Calendar Courier//EN")
     cal.add("version", "2.0")
     return cal
 
@@ -123,7 +123,7 @@ def imap_date(d):
 
 
 def extract_calendar(msg):
-    """Liefert den ersten iCalendar-Anhang mit METHOD (die eigentliche Einladung)."""
+    """Returns the first iCalendar part with a METHOD (the actual invitation)."""
     for part in msg.walk():
         ctype = part.get_content_type()
         fname = (part.get_filename() or "").lower()
@@ -135,7 +135,7 @@ def extract_calendar(msg):
         try:
             cal = Calendar.from_ical(payload)
         except Exception as err:  # noqa: BLE001
-            log.warning("iCalendar-Teil nicht lesbar: %s", err)
+            log.warning("Unreadable iCalendar part: %s", err)
             continue
         if cal.get("METHOD"):
             return cal
@@ -143,7 +143,7 @@ def extract_calendar(msg):
 
 
 # --------------------------------------------------------------------------
-# CalDAV-Operationen
+# CalDAV operations
 # --------------------------------------------------------------------------
 
 class CalendarError(RuntimeError):
@@ -162,8 +162,8 @@ class StoredEvent:
 
 
 class CalStore:
-    """Termine liegen unter <Kalender-URL>/<UID>.ics – so braucht es keine
-    REPORT-Suche, nur einfaches GET/PUT/DELETE."""
+    """Events are stored at <calendar-url>/<UID>.ics, so no REPORT query is
+    needed, only plain GET/PUT/DELETE."""
 
     def __init__(self, client, url):
         self.client = client
@@ -178,7 +178,7 @@ class CalStore:
 
     def _check(self, resp, what):
         if resp.status not in (200, 201, 204):
-            raise CalendarError("%s fehlgeschlagen: HTTP %s %s"
+            raise CalendarError("%s failed: HTTP %s %s"
                                 % (what, resp.status, str(resp.raw)[:300]))
 
     def get(self, uid):
@@ -186,7 +186,7 @@ class CalStore:
         resp = self.client.request(url, "GET")
         if resp.status == 404:
             return None
-        self._check(resp, "Lesen")
+        self._check(resp, "Read")
         data = resp.raw if isinstance(resp.raw, str) else resp.raw.decode()
         return StoredEvent(self, url, data)
 
@@ -196,29 +196,29 @@ class CalStore:
     def put_url(self, url, ical):
         resp = self.client.put(url, ical.encode(),
                                {"Content-Type": "text/calendar; charset=utf-8"})
-        self._check(resp, "Speichern")
+        self._check(resp, "Save")
 
     def delete_url(self, url):
         resp = self.client.delete(url)
         if resp.status != 404:
-            self._check(resp, "Löschen")
+            self._check(resp, "Delete")
 
 
 def check_calendar(client, url):
-    """Prüft beim Start, ob die URL wirklich ein Kalender ist, sonst Hinweise ins Log."""
+    """Checks on startup that the URL is a calendar; otherwise logs hints."""
     try:
         comps = caldav.Calendar(client=client, url=url).get_supported_components()
         if "VEVENT" in comps:
             return True
     except Exception as err:  # noqa: BLE001
-        log.debug("Kalenderprüfung: %s", err)
-    log.error("caldav_url ist kein Kalender: %s", url)
+        log.debug("Calendar check: %s", err)
+    log.error("caldav_url is not a calendar: %s", url)
     try:
         for cal in client.principal().calendars():
-            log.error("  Gefundener Kalender: %s  ->  %s", cal.name, cal.url)
-        log.error("Bitte eine der obigen URLs als caldav_url eintragen.")
+            log.error("  Found calendar: %s  ->  %s", cal.name, cal.url)
+        log.error("Please use one of the URLs above as caldav_url.")
     except Exception as err:  # noqa: BLE001
-        log.error("Kalender konnten nicht aufgelistet werden: %s", err)
+        log.error("Could not list calendars: %s", err)
     return False
 
 
@@ -238,24 +238,24 @@ def apply_request(calendar, uid, comps, tzs, own_addr):
         for comp in comps:
             cal.add_component(comp)
         calendar.put(uid, cal.to_ical().decode())
-        log.info("Neu eingetragen: %s", summary(comps[0]))
+        log.info("Created: %s", summary(comps[0]))
         return
 
     stored = Calendar.from_ical(existing.data)
     stored.pop("METHOD", None)
     changed = False
 
-    for inc in comps:  # Hauptereignis steht vorne (siehe process_message)
+    for inc in comps:  # master event comes first (see process_message)
         key = rid_key(inc)
         events = [c for c in stored.subcomponents if c.name == "VEVENT"]
         cur = next((e for e in events if rid_key(e) == key), None)
 
         if cur is not None and seq(inc) < seq(cur):
-            log.info("Veraltete Einladung ignoriert: %s", summary(inc))
+            log.info("Ignored outdated invitation: %s", summary(inc))
             continue
 
         if key is None and cur is not None and series_changed(cur, inc):
-            # Serienmuster geändert -> alte Ausnahmen sind ungültig (Outlook verwirft sie auch)
+            # series pattern changed -> old exceptions are invalid (Outlook drops them too)
             stored.subcomponents = [c for c in stored.subcomponents
                                     if not (c.name == "VEVENT" and rid_key(c) is not None)]
 
@@ -265,7 +265,7 @@ def apply_request(calendar, uid, comps, tzs, own_addr):
         else:
             stored.add_component(inc)
         changed = True
-        log.info("Aktualisiert: %s", summary(inc))
+        log.info("Updated: %s", summary(inc))
 
     known_tz = {str(c.get("TZID")) for c in stored.subcomponents if c.name == "VTIMEZONE"}
     for tz in tzs:
@@ -281,12 +281,12 @@ def apply_request(calendar, uid, comps, tzs, own_addr):
 def apply_cancel(calendar, uid, comps):
     existing = find_event(calendar, uid)
     if existing is None:
-        log.info("Absage für unbekannten Termin %s – nichts zu tun", uid)
+        log.info("Cancellation for unknown event %s – nothing to do", uid)
         return
 
     if any(rid_key(c) is None for c in comps):
         existing.delete()
-        log.info("Gelöscht: %s", summary(comps[0]))
+        log.info("Deleted: %s", summary(comps[0]))
         return
 
     stored = Calendar.from_ical(existing.data)
@@ -300,7 +300,7 @@ def apply_cancel(calendar, uid, comps):
                                 if not (c.name == "VEVENT" and rid_key(c) == key)]
         if master is not None:
             master.add("EXDATE", comp["RECURRENCE-ID"].dt)
-        log.info("Serientermin abgesagt: %s", summary(comp))
+        log.info("Occurrence cancelled: %s", summary(comp))
 
     if not any(c.name == "VEVENT" for c in stored.subcomponents):
         existing.delete()
@@ -310,7 +310,7 @@ def apply_cancel(calendar, uid, comps):
 
 
 # --------------------------------------------------------------------------
-# Mailverarbeitung
+# Mail processing
 # --------------------------------------------------------------------------
 
 def process_message(raw, calendar, opts):
@@ -318,7 +318,7 @@ def process_message(raw, calendar, opts):
     sender = addr(parseaddr(str(msg.get("From", "")))[1])
     cal = extract_calendar(msg)
     if cal is None:
-        log.debug("Mail von %s enthält keine Einladung", sender)
+        log.debug("Mail from %s contains no invitation", sender)
         return
 
     method = str(cal.get("METHOD")).upper()
@@ -333,9 +333,9 @@ def process_message(raw, calendar, opts):
 
     for uid, comps in by_uid.items():
         if allowed and sender not in allowed:
-            log.warning("Einladung von %s nicht erlaubt – ignoriert", sender)
+            log.warning("Invitation from %s not allowed – ignored", sender)
             continue
-        comps.sort(key=lambda c: rid_key(c) is not None)  # Hauptereignis zuerst
+        comps.sort(key=lambda c: rid_key(c) is not None)  # master event first
 
         if method in ("REQUEST", "PUBLISH", "ADD"):
             active, cancelled = [], []
@@ -349,7 +349,7 @@ def process_message(raw, calendar, opts):
         elif method == "CANCEL":
             apply_cancel(calendar, uid, comps)
         else:
-            log.debug("Methode %s ignoriert (%s)", method, uid)
+            log.debug("Method %s ignored (%s)", method, uid)
 
 
 def run_once(opts, state, failures):
@@ -367,7 +367,7 @@ def run_once(opts, state, failures):
         imap.login(opts["imap_user"], opts["imap_password"])
         typ, _ = imap.select('"%s"' % folder)
         if typ != "OK":
-            raise RuntimeError("Ordner %s nicht gefunden" % folder)
+            raise RuntimeError("Folder %s not found" % folder)
         uidvalidity = (imap.response("UIDVALIDITY")[1] or [b"0"])[0].decode()
 
         since = imap_date(date.today() - timedelta(days=SEARCH_DAYS))
@@ -385,15 +385,15 @@ def run_once(opts, state, failures):
             try:
                 process_message(raw, calendar, opts)
             except (CalendarError, caldav.lib.error.DAVError, OSError):
-                # Server-/Verbindungsproblem: Mail nie überspringen, später erneut versuchen
-                log.exception("Kalenderserver-Fehler bei Mail %s – neuer Versuch im nächsten Durchlauf", key)
+                # server/connection problem: never skip the mail, retry later
+                log.exception("Calendar server error for mail %s – retrying next run", key)
                 break
             except Exception:  # noqa: BLE001
                 failures[key] = failures.get(key, 0) + 1
-                log.exception("Fehler bei Mail %s (Versuch %d)", key, failures[key])
+                log.exception("Error processing mail %s (attempt %d)", key, failures[key])
                 if failures[key] < MAX_FAILURES:
-                    break  # Reihenfolge wahren, im nächsten Durchlauf erneut versuchen
-                log.error("Mail %s wird nach %d Fehlversuchen übersprungen", key, MAX_FAILURES)
+                    break  # keep order, retry next run
+                log.error("Skipping mail %s after %d failed attempts", key, MAX_FAILURES)
 
             state[key] = time.time()
             save_state(state)
@@ -404,7 +404,7 @@ def run_once(opts, state, failures):
                     imap.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
                     moved = True
                 else:
-                    log.warning("Verschieben nach %s fehlgeschlagen", processed)
+                    log.warning("Moving to %s failed", processed)
 
         if moved:
             imap.expunge()
@@ -421,21 +421,21 @@ def main():
         level=getattr(logging, str(opts.get("log_level", "info")).upper(), logging.INFO),
         format="%(asctime)s %(levelname)s %(message)s",
     )
-    # caldav meldet harmlose Abweichungen (z. B. HTML-Antwort bei 404) als Warnung
+    # caldav logs harmless deviations (e.g. HTML body on 404) as warnings
     logging.getLogger("caldav").setLevel(logging.ERROR)
     if not opts.get("allowed_senders"):
-        log.warning("Keine erlaubten Absender gesetzt – JEDE Einladung wird übernommen!")
+        log.warning("No allowed senders configured – EVERY invitation will be accepted!")
 
     state = load_json(STATE_FILE, {})
     failures = {}
     interval = int(opts.get("poll_interval", 120))
-    log.info("Kalenderbote gestartet, Intervall %ss", interval)
+    log.info("Calendar Courier started, interval %ss", interval)
 
     while True:
         try:
             run_once(opts, state, failures)
         except Exception:  # noqa: BLE001
-            log.exception("Durchlauf fehlgeschlagen")
+            log.exception("Run failed")
         time.sleep(interval)
 
 

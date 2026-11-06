@@ -1,7 +1,7 @@
 configuration:
   imap_host:
     name: IMAP-Server
-    description: Mailserver des Familien-Postfachs, z. B. imap.example.de
+    description: Mailserver des Postfachs, an das die Einladungen gehen, z. B. imap.example.de
   imap_port:
     name: IMAP-Port
     description: Normalerweise 993 (SSL/TLS)

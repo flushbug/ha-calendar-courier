@@ -1,23 +1,22 @@
-# 📬📅 Kalenderbote
+# 📬📅 Calendar Courier
 
-Ein Home-Assistant-Add-on, das Termineinladungen aus einem Postfach automatisch in einen
-CalDAV-Kalender (z. B. Nextcloud) einträgt – inklusive Verschiebungen und Absagen.
+A Home Assistant add-on that delivers meeting invitations from a mailbox into a CalDAV
+calendar (e.g. Nextcloud) – including reschedules and cancellations.
 
-Gedacht für einen Familienkalender: Jeder pflegt seinen eigenen Kalender (z. B. Microsoft 365)
-und lädt einfach die Familienadresse zu gemeinsamen Terminen ein. Der Kalenderbote nimmt die
-Einladung an und hält den Familienkalender aktuell, der dann z. B. auf einem Display in
-Home Assistant angezeigt wird.
+Built for a family calendar: everyone keeps their own calendar (e.g. Microsoft 365) and simply
+invites the family address to shared events. Calendar Courier accepts the invitation and keeps
+the shared calendar up to date, ready to be shown on a wall display in Home Assistant.
 
 ## Installation
-[![Repository zu Home Assistant hinzufügen](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FFlushbug%2Fha-kalenderbote)
+[![Add repository to Home Assistant](https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg)](https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FFlushbug%2Fha-calendar-courier)
 
-Oder manuell: **Einstellungen → Add-ons → Add-on Store → ⋮ → Repositories** und
-`https://github.com/Flushbug/ha-kalenderbote` hinzufügen. Danach „Kalenderbote“ installieren.
+Or manually: **Settings → Add-ons → Add-on Store → ⋮ → Repositories** and add
+`https://github.com/Flushbug/ha-calendar-courier`. Then install "Calendar Courier".
 
-Updates erscheinen automatisch in Home Assistant, sobald die Version in
-`kalenderbote/config.yaml` erhöht wurde.
+Updates show up in Home Assistant automatically whenever the version in
+`calendar_courier/config.yaml` is increased.
 
-Details zur Einrichtung: [kalenderbote/DOCS.md](kalenderbote/DOCS.md)
+Setup details: [calendar_courier/DOCS.md](calendar_courier/DOCS.md)
 
-## Lizenz
+## License
 MIT
