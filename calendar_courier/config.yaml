@@ -1,5 +1,5 @@
 name: Calendar Courier
-version: "1.2.0"
+version: "1.3.0"
 slug: calendar_courier
 description: Delivers meeting invitations from a mailbox into a shared CalDAV calendar (e.g. Nextcloud) – including reschedules and cancellations.
 url: https://github.com/Flushbug/ha-calendar-courier
@@ -20,6 +20,7 @@ options:
   caldav_user: ""
   caldav_password: ""
   allowed_senders: []
+  delete_processed: false
   poll_interval: 120
   log_level: info
 schema:
@@ -34,5 +35,6 @@ schema:
   caldav_password: password
   allowed_senders:
     - email
+  delete_processed: bool
   poll_interval: int(30,3600)
   log_level: list(debug|info|warning|error)

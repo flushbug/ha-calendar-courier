@@ -1,5 +1,8 @@
 # Changelog
 
+## 1.3.0
+- New option `delete_processed`: deletes valid, processed invitations from the mailbox
+
 ## 1.2.0
 - Renamed to Calendar Courier, English as the default language (German translation included)
 

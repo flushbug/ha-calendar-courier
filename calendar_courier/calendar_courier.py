@@ -314,12 +314,14 @@ def apply_cancel(calendar, uid, comps):
 # --------------------------------------------------------------------------
 
 def process_message(raw, calendar, opts):
+    """Applies the invitation in a mail. Returns True if the mail was a valid
+    invitation from an allowed sender and has been applied to the calendar."""
     msg = email.message_from_bytes(raw, policy=email.policy.default)
     sender = addr(parseaddr(str(msg.get("From", "")))[1])
     cal = extract_calendar(msg)
     if cal is None:
         log.debug("Mail from %s contains no invitation", sender)
-        return
+        return False
 
     method = str(cal.get("METHOD")).upper()
     tzs = [c for c in cal.subcomponents if c.name == "VTIMEZONE"]
@@ -331,10 +333,12 @@ def process_message(raw, calendar, opts):
         if comp.name == "VEVENT" and comp.get("UID"):
             by_uid.setdefault(str(comp.get("UID")), []).append(comp)
 
+    if allowed and sender not in allowed:
+        log.warning("Invitation from %s not allowed – ignored", sender)
+        return False
+
+    applied = False
     for uid, comps in by_uid.items():
-        if allowed and sender not in allowed:
-            log.warning("Invitation from %s not allowed – ignored", sender)
-            continue
         comps.sort(key=lambda c: rid_key(c) is not None)  # master event first
 
         if method in ("REQUEST", "PUBLISH", "ADD"):
@@ -346,10 +350,13 @@ def process_message(raw, calendar, opts):
                 apply_request(calendar, uid, active, tzs, own_addr)
             if cancelled:
                 apply_cancel(calendar, uid, cancelled)
+            applied = True
         elif method == "CANCEL":
             apply_cancel(calendar, uid, comps)
+            applied = True
         else:
             log.debug("Method %s ignored (%s)", method, uid)
+    return applied
 
 
 def run_once(opts, state, failures):
@@ -362,6 +369,7 @@ def run_once(opts, state, failures):
 
     folder = opts.get("imap_folder") or "INBOX"
     processed = opts.get("processed_folder")
+    delete_valid = bool(opts.get("delete_processed", False))
     imap = imaplib.IMAP4_SSL(opts["imap_host"], int(opts.get("imap_port", 993)))
     try:
         imap.login(opts["imap_user"], opts["imap_password"])
@@ -372,7 +380,7 @@ def run_once(opts, state, failures):
 
         since = imap_date(date.today() - timedelta(days=SEARCH_DAYS))
         _, data = imap.uid("SEARCH", None, "SINCE", since)
-        moved = False
+        expunge = False
 
         for uid in (data[0] or b"").split():
             key = "%s:%s:%s" % (folder, uidvalidity, uid.decode())
@@ -382,8 +390,9 @@ def run_once(opts, state, failures):
             raw = next((p[1] for p in msgdata if isinstance(p, tuple)), None)
             if raw is None:
                 continue
+            valid = False
             try:
-                process_message(raw, calendar, opts)
+                valid = process_message(raw, calendar, opts)
             except (CalendarError, caldav.lib.error.DAVError, OSError):
                 # server/connection problem: never skip the mail, retry later
                 log.exception("Calendar server error for mail %s – retrying next run", key)
@@ -398,15 +407,19 @@ def run_once(opts, state, failures):
             state[key] = time.time()
             save_state(state)
             imap.uid("STORE", uid, "+FLAGS", "(\\Seen)")
-            if processed:
+            if valid and delete_valid:
+                imap.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
+                expunge = True
+                log.info("Deleted processed mail %s from mailbox", key)
+            elif processed:
                 typ, _ = imap.uid("COPY", uid, '"%s"' % processed)
                 if typ == "OK":
                     imap.uid("STORE", uid, "+FLAGS", "(\\Deleted)")
-                    moved = True
+                    expunge = True
                 else:
                     log.warning("Moving to %s failed", processed)
 
-        if moved:
+        if expunge:
             imap.expunge()
     finally:
         try:

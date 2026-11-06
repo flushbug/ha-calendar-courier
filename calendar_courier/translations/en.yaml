@@ -27,6 +27,9 @@ configuration:
   allowed_senders:
     name: Allowed senders
     description: Only invitations from these addresses are accepted
+  delete_processed:
+    name: Delete processed invitations
+    description: Valid invitations from allowed senders are deleted from the mailbox after they have been added to the calendar. Other mails are kept.
   poll_interval:
     name: Polling interval (seconds)
   log_level:

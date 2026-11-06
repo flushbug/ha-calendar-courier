@@ -27,6 +27,9 @@ configuration:
   allowed_senders:
     name: Erlaubte Absender
     description: Nur Einladungen von diesen Adressen werden übernommen (deine und die deiner Frau)
+  delete_processed:
+    name: Verarbeitete Einladungen löschen
+    description: Gültige Einladungen erlaubter Absender werden nach dem Eintragen in den Kalender aus dem Postfach gelöscht. Andere Mails bleiben erhalten.
   poll_interval:
     name: Abfrageintervall (Sekunden)
   log_level:

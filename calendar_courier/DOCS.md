@@ -32,7 +32,8 @@ No reply is sent to the organizer. Only the organizer of an event can change or 
 | `imap_host`, `imap_port` | Mail server of the mailbox (port usually 993) |
 | `imap_user`, `imap_password` | Mailbox credentials |
 | `imap_folder` | Folder where invitations arrive (default `INBOX`) |
-| `processed_folder` | Optional: move processed mails here |
+| `processed_folder` | Optional: move processed mails here (with `delete_processed`, only mails that were not deleted) |
+| `delete_processed` | Delete valid invitations from allowed senders from the mailbox once they are in the calendar (default `false`) |
 | `caldav_url` | URL of the target calendar |
 | `caldav_user`, `caldav_password` | CalDAV credentials (an app password is recommended) |
 | `allowed_senders` | Only invitations from these senders are accepted |
