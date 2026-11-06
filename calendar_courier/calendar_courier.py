@@ -147,7 +147,16 @@ def extract_calendar(msg):
 # --------------------------------------------------------------------------
 
 class CalendarError(RuntimeError):
-    pass
+    def __init__(self, message, status=None):
+        super().__init__(message)
+        self.status = status
+
+    @property
+    def rejected(self):
+        """True if the server rejected the data itself (4xx or 500), as
+        opposed to being unreachable or temporarily unavailable (502-504)."""
+        return self.status is not None and (400 <= self.status < 500
+                                            or self.status == 500)
 
 
 class StoredEvent:
@@ -179,7 +188,8 @@ class CalStore:
     def _check(self, resp, what):
         if resp.status not in (200, 201, 204):
             raise CalendarError("%s failed: HTTP %s %s"
-                                % (what, resp.status, str(resp.raw)[:300]))
+                                % (what, resp.status, str(resp.raw)[:300]),
+                                resp.status)
 
     def get(self, uid):
         url = self.url_for(uid)
@@ -196,7 +206,11 @@ class CalStore:
     def put_url(self, url, ical):
         resp = self.client.put(url, ical.encode(),
                                {"Content-Type": "text/calendar; charset=utf-8"})
-        self._check(resp, "Save")
+        try:
+            self._check(resp, "Save")
+        except CalendarError:
+            log.error("Calendar server rejected this iCalendar (%s):\n%s", url, ical)
+            raise
 
     def delete_url(self, url):
         resp = self.client.delete(url)
@@ -393,8 +407,19 @@ def run_once(opts, state, failures):
             valid = False
             try:
                 valid = process_message(raw, calendar, opts)
-            except (CalendarError, caldav.lib.error.DAVError, OSError):
-                # server/connection problem: never skip the mail, retry later
+            except CalendarError as err:
+                if not err.rejected:
+                    # server unavailable: never skip the mail, retry later
+                    log.exception("Calendar server error for mail %s – retrying next run", key)
+                    break
+                # server rejected the data: retrying the same mail will not help
+                failures[key] = failures.get(key, 0) + 1
+                log.exception("Calendar server rejected mail %s (attempt %d)", key, failures[key])
+                if failures[key] < MAX_FAILURES:
+                    break  # keep order, retry next run
+                log.error("Skipping mail %s after %d failed attempts", key, MAX_FAILURES)
+            except (caldav.lib.error.DAVError, OSError):
+                # connection problem: never skip the mail, retry later
                 log.exception("Calendar server error for mail %s – retrying next run", key)
                 break
             except Exception:  # noqa: BLE001

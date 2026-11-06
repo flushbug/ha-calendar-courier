@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.1
+- When the calendar server rejects an event, the full iCalendar data is written to the log
+- A mail the server keeps rejecting (HTTP 4xx/500) is skipped after 3 attempts instead of blocking all later mails
+
 ## 1.3.0
 - New option `delete_processed`: deletes valid, processed invitations from the mailbox
 
