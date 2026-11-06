@@ -19,6 +19,7 @@ import time
 from datetime import date, datetime, timedelta, timezone
 from urllib.parse import quote
 from email.utils import parseaddr
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError, available_timezones
 
 import caldav
 from icalendar import Calendar
@@ -109,6 +110,125 @@ def mark_accepted(comp, own_addr):
         if addr(attendee) == own_addr:
             attendee.params["PARTSTAT"] = "ACCEPTED"
             attendee.params.pop("RSVP", None)
+
+
+def no_server_scheduling(comp):
+    """Marks organizer and attendees with SCHEDULE-AGENT=CLIENT (RFC 6638), so
+    the CalDAV server does not send its own invitations or replies for them.
+    The organizer's mail client already handles scheduling."""
+    for name in ("ORGANIZER", "ATTENDEE"):
+        values = comp.get(name)
+        if values is None:
+            continue
+        for value in values if isinstance(values, list) else [values]:
+            value.params["SCHEDULE-AGENT"] = "CLIENT"
+
+
+# --------------------------------------------------------------------------
+# Time zones: Outlook/Exchange often sends TZIDs like "Customized Time Zone"
+# or "W. Europe Standard Time", which some servers cannot handle. They are
+# replaced by the IANA zone with identical rules (e.g. Europe/Berlin).
+# --------------------------------------------------------------------------
+
+PREFERRED_ZONES = ["Europe/Berlin", "Europe/Vienna", "Europe/Zurich", "Europe/Paris",
+                   "Europe/London", "Europe/Helsinki", "America/New_York", "UTC"]
+DT_PROPS = ("DTSTART", "DTEND", "DUE", "RECURRENCE-ID", "EXDATE", "RDATE")
+_zone_cache = {}
+
+
+def _is_iana(name):
+    try:
+        ZoneInfo(name)
+        return "/" in name or name == "UTC"
+    except (ZoneInfoNotFoundError, ValueError):
+        return False
+
+
+def _samples():
+    """One sample every 6 hours over two years, so DST switches are covered."""
+    start = datetime(date.today().year, 1, 1, tzinfo=timezone.utc)
+    return [start + timedelta(hours=6 * i) for i in range(4 * 731)]
+
+
+def _same_rules(tz, zone, samples):
+    return all(t.astimezone(tz).utcoffset() == t.astimezone(zone).utcoffset()
+               for t in samples)
+
+
+def iana_for(tzinfo):
+    """Returns the IANA zone name with the same rules as tzinfo, or None."""
+    name = (getattr(tzinfo, "key", None) or getattr(tzinfo, "_tzid", None)
+            or getattr(tzinfo, "zone", None) or str(tzinfo))
+    if _is_iana(name):
+        return name
+    if name in _zone_cache:
+        return _zone_cache[name]
+    samples = _samples()
+    found = None
+    candidates = PREFERRED_ZONES + sorted(available_timezones() - set(PREFERRED_ZONES))
+    for cand in candidates:
+        if _is_iana(cand) and _same_rules(tzinfo, ZoneInfo(cand), samples):
+            found = cand
+            break
+    _zone_cache[name] = found
+    if found:
+        log.info("Time zone '%s' mapped to %s", name, found)
+    else:
+        log.warning("No IANA time zone matches '%s' – keeping it", name)
+    return found
+
+
+def _to_iana(value):
+    tz = getattr(value, "tzinfo", None)
+    if not isinstance(value, datetime) or tz is None or tz is timezone.utc:
+        return value
+    iana = iana_for(tz)
+    if iana is None:
+        return value
+    # same wall-clock time, real zone
+    return value.replace(tzinfo=ZoneInfo(iana))
+
+
+def normalize_timezones(comp):
+    """Rewrites all date-time properties of comp to IANA time zones."""
+    for name in DT_PROPS:
+        values = comp.get(name)
+        if values is None:
+            continue
+        values = values if isinstance(values, list) else [values]
+        new_values = []
+        for value in values:
+            dts = [d.dt for d in value.dts] if hasattr(value, "dts") else [value.dt]
+            params = {k: v for k, v in value.params.items() if k != "TZID"}
+            new_values.append(([_to_iana(d) for d in dts], params))
+        del comp[name]
+        for dts, params in new_values:
+            if name in ("EXDATE", "RDATE"):
+                comp.add(name, dts, parameters=params or None)
+            else:
+                comp.add(name, dts[0], parameters=params or None)
+
+
+def prepare(comps):
+    """Makes incoming events safe to store on the CalDAV server."""
+    for comp in comps:
+        normalize_timezones(comp)
+        no_server_scheduling(comp)
+
+
+def finish_calendar(cal):
+    """Drops VTIMEZONE blocks that are no longer needed and adds standard ones
+    for the IANA zones in use."""
+    for comp in cal.subcomponents:
+        if comp.name == "VEVENT":
+            normalize_timezones(comp)
+    used = cal.get_used_tzids()
+    cal.subcomponents = [c for c in cal.subcomponents
+                         if c.name != "VTIMEZONE"
+                         or (str(c.get("TZID")) in used and not _is_iana(str(c.get("TZID"))))]
+    cal.add_missing_timezones()
+    # VTIMEZONE must come before the events
+    cal.subcomponents.sort(key=lambda c: c.name != "VTIMEZONE")
 
 
 def new_calendar():
@@ -243,6 +363,7 @@ def find_event(calendar, uid):
 def apply_request(calendar, uid, comps, tzs, own_addr):
     for comp in comps:
         mark_accepted(comp, own_addr)
+    prepare(comps)
 
     existing = find_event(calendar, uid)
     if existing is None:
@@ -251,6 +372,7 @@ def apply_request(calendar, uid, comps, tzs, own_addr):
             cal.add_component(tz)
         for comp in comps:
             cal.add_component(comp)
+        finish_calendar(cal)
         calendar.put(uid, cal.to_ical().decode())
         log.info("Created: %s", summary(comps[0]))
         return
@@ -288,6 +410,7 @@ def apply_request(calendar, uid, comps, tzs, own_addr):
             changed = True
 
     if changed:
+        finish_calendar(stored)
         existing.data = stored.to_ical().decode()
         existing.save()
 
@@ -305,6 +428,7 @@ def apply_cancel(calendar, uid, comps):
 
     stored = Calendar.from_ical(existing.data)
     stored.pop("METHOD", None)
+    prepare(comps)
     master = next((c for c in stored.subcomponents
                    if c.name == "VEVENT" and rid_key(c) is None), None)
 
@@ -319,6 +443,7 @@ def apply_cancel(calendar, uid, comps):
     if not any(c.name == "VEVENT" for c in stored.subcomponents):
         existing.delete()
     else:
+        finish_calendar(stored)
         existing.data = stored.to_ical().decode()
         existing.save()
 

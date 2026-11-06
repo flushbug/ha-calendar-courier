@@ -1,5 +1,9 @@
 # Changelog
 
+## 1.3.2
+- Outlook/Exchange time zones such as "Customized Time Zone" are replaced by the matching IANA zone (e.g. Europe/Berlin); Nextcloud rejected such events with HTTP 500
+- Organizer and attendees are marked `SCHEDULE-AGENT=CLIENT`, so the CalDAV server never sends its own invitation or reply mails for mirrored events
+
 ## 1.3.1
 - When the calendar server rejects an event, the full iCalendar data is written to the log
 - A mail the server keeps rejecting (HTTP 4xx/500) is skipped after 3 attempts instead of blocking all later mails
